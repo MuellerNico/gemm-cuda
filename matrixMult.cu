@@ -4,10 +4,15 @@
 
 #define DataType float
 
-// Compute C = A * B
+/**
+ * @brief Performs matrix multiplication of two matrices A and B, and adds the result to matrix C.
+ *
+ * This function computes the general matrix multiplication (GEMM) operation:
+ * C = alpha * A * B + beta * C
+ * where A, B, and C are matrices, and alpha and beta are scalars.
+ */
 __global__ void gemm(DataType *A, DataType *B, DataType *C, int numARows,
-                      int numAColumns, int numBRows, int numBColumns){
-  //@@ Insert code to implement matrix multiplication here
+           int numAColumns, int numBRows, int numBColumns) {
   int row = blockIdx.x * blockDim.x + threadIdx.x;
   int col = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -22,81 +27,94 @@ __global__ void gemm(DataType *A, DataType *B, DataType *C, int numARows,
   C[row * numBColumns + col] = sum;
 }
 
+/**
+ * @brief Performs a tiled matrix multiplication (GEMM) on the GPU.
+ *
+ * This function computes the product of two matrices A and B, and stores the result in matrix C.
+ * The computation is performed using a tiled approach to optimize memory access patterns and improve performance.
+ * 
+ * @param TILE_SIZE Size of the tile used for the computation.
+ */
 __global__ void tiled_gemm(DataType *A, DataType *B, DataType *C, int numARows,
-  int numAColumns, int numBRows, int numBColumns, int TILE_SIZE) 
-{
-
+               int numAColumns, int numBRows, int numBColumns, int TILE_SIZE) {
   int blockRow = blockIdx.x;
   int blockCol = blockIdx.y;
   int row = threadIdx.x;
   int col = threadIdx.y;
   int globalRow = blockRow * TILE_SIZE + row;
   int globalCol = blockCol * TILE_SIZE + col;
-  
-  extern __shared__ DataType shared[];
-  DataType* As = shared;
-  DataType* Bs = shared + TILE_SIZE * TILE_SIZE;
-  
+
+  extern __shared__ DataType shared[];  // dynamically allocated shared memory
+  DataType *As = shared;
+  DataType *Bs = shared + TILE_SIZE * TILE_SIZE;
+
   DataType sum = 0;
-  
+
   // loop over tiles
   int numTiles = (numAColumns + TILE_SIZE - 1) / TILE_SIZE;
-  
+
   for (int t = 0; t < numTiles; t++) {
-      int tileIdx = t * TILE_SIZE;
-      
-      // load A tile into shared memory
-      if (globalRow < numARows && (tileIdx + col) < numAColumns) {
-          As[row * TILE_SIZE + col] = A[globalRow * numAColumns + (tileIdx + col)];
-      } 
-      else {
-          As[row * TILE_SIZE + col] = 0;
-      }
-      
-      // load B tile into shared memory
-      if ((tileIdx + row) < numBRows && globalCol < numBColumns) {
-          Bs[row * TILE_SIZE + col] = B[(tileIdx + row) * numBColumns + globalCol];
-      } 
-      else {
-          Bs[row * TILE_SIZE + col] = 0;
-      }
-      
-      __syncthreads(); // continue after all threads have loaded their tiles
-      
-      for (int k = 0; k < TILE_SIZE; k++) {
-          sum += As[row * TILE_SIZE + k] * Bs[k * TILE_SIZE + col];
-      }
-      
-      __syncthreads(); // finish computation before loading next tile
+    int tileIdx = t * TILE_SIZE;
+
+    // load A tile into shared memory
+    if (globalRow < numARows && (tileIdx + col) < numAColumns) {
+      As[row * TILE_SIZE + col] = A[globalRow * numAColumns + (tileIdx + col)];
+    } else {
+      As[row * TILE_SIZE + col] = 0;
+    }
+
+    // load B tile into shared memory
+    if ((tileIdx + row) < numBRows && globalCol < numBColumns) {
+      Bs[row * TILE_SIZE + col] = B[(tileIdx + row) * numBColumns + globalCol];
+    } else {
+      Bs[row * TILE_SIZE + col] = 0;
+    }
+
+    __syncthreads(); // continue after all threads have loaded their tiles
+
+    // compute the tile
+    for (int k = 0; k < TILE_SIZE; k++) {
+      sum += As[row * TILE_SIZE + k] * Bs[k * TILE_SIZE + col];
+    }
+
+    __syncthreads(); // finish computation before loading next tile
   }
-  
-  // Write result
+
+  // Write result to global memory
   if (globalRow < numARows && globalCol < numBColumns) {
-      C[globalRow * numBColumns + globalCol] = sum;
+    C[globalRow * numBColumns + globalCol] = sum;
   }
-  
 }
 
+/**
+ * @brief Performs matrix multiplication of two matrices A and B on the CPU.
+ *
+ * This function computes the general matrix multiplication (GEMM) operation:
+ * C = A * B
+ */
 void gemm_CPU(DataType *A, DataType *B, DataType *C, int numARows,
-              int numAColumns, int numBRows, int numBColumns) {
-                for (int i = 0; i < numARows; i++) {
-                  for (int j = 0; j < numBColumns; j++) {
-                    DataType sum = 0;
-                    for (int k = 0; k < numAColumns; k++) {
-                      sum += A[i * numAColumns + k] * B[k * numBColumns + j];
-                    }
-                    C[i * numBColumns + j] = sum;
-                  }
-                }
-              }
+        int numAColumns, int numBRows, int numBColumns) {
+  for (int i = 0; i < numARows; i++) {
+    for (int j = 0; j < numBColumns; j++) {
+      DataType sum = 0;
+      for (int k = 0; k < numAColumns; k++) {
+        sum += A[i * numAColumns + k] * B[k * numBColumns + j];
+      }
+      C[i * numBColumns + j] = sum;
+    }
+  }
+}
 
-
+/**
+ * @brief Checks the result of the matrix multiplication by comparing the output with the reference.
+ *
+ * This function computes the infinity norm of the difference between the output and the reference.
+ */
 DataType checkResult(DataType *A, DataType *B, int rows, int cols) {
   // return inf norm of A - B
-  printf("Checking result\n");
   DataType diff = 0;
   DataType maxDiff = 0;
-  for (int i = 0; i < rows*cols; ++i) {
+  for (int i = 0; i < rows * cols; ++i) {
     diff = abs(A[i] - B[i]);
     if (diff > maxDiff) {
       maxDiff = diff;
@@ -105,16 +123,16 @@ DataType checkResult(DataType *A, DataType *B, int rows, int cols) {
   return maxDiff;
 }
 
-
-//@@ Insert code to implement timer start
+/**
+ * @brief Returns the current time in seconds.
+ */
 __host__ double cpuSecond() {
   struct timeval tp;
   gettimeofday(&tp, NULL);
-  return ((double)tp.tv_sec + (double)tp.tv_usec*1e-6);
+  return ((double)tp.tv_sec + (double)tp.tv_usec * 1e-6);
 }
 
 int main(int argc, char **argv) {
-
   DataType *hostA; // The A matrix
   DataType *hostB; // The B matrix
   DataType *hostC; // The output C matrix
@@ -145,12 +163,11 @@ int main(int argc, char **argv) {
   hostC = (DataType*)malloc(numCRows * numCColumns * sizeof(DataType));
   resultRef = (DataType*)malloc(numCRows * numCColumns * sizeof(DataType));
 
-
   //@@ Insert code below to initialize hostA and hostB to random numbers, and create reference result in CPU
-  for (int i = 0; i < numARows*numAColumns; i++){
+  for (int i = 0; i < numARows * numAColumns; i++) {
     hostA[i] = 1.0 * rand() / RAND_MAX;
   }
-  for (int i = 0; i < numBRows*numBColumns; ++i) {
+  for (int i = 0; i < numBRows * numBColumns; ++i) {
     hostB[i] = 1.0 * rand() / RAND_MAX;
   }
 
@@ -160,21 +177,19 @@ int main(int argc, char **argv) {
   cudaMalloc((void**)&deviceB, numBRows * numBColumns * sizeof(DataType));
   cudaMalloc((void**)&deviceC, numCRows * numCColumns * sizeof(DataType));
   double time_alloc = cpuSecond() - t0;
-  //printf("Time alloc is %f\n", time_alloc);
 
   //@@ Insert code to below to Copy memory to the GPU here
   t0 = cpuSecond();
   cudaMemcpy(deviceA, hostA, numARows * numAColumns * sizeof(DataType), cudaMemcpyHostToDevice);
   cudaMemcpy(deviceB, hostB, numBRows * numBColumns * sizeof(DataType), cudaMemcpyHostToDevice);
   double time_copy = cpuSecond() - t0;
-  //printf("H2D copy is %f\n", time_copy);
 
   //@@ Insert code below to compare the output with the reference
   printf("\nCPU reference\n");
   t0 = cpuSecond();
   gemm_CPU(hostA, hostB, resultRef, numARows, numAColumns, numBRows, numBColumns);
   double time_cpu = cpuSecond() - t0;
-  printf("Timing: %f ms\n", time_cpu);
+  printf("Timing: %f\n", time_cpu);
 
   //@@ Initialize the grid and block dimensions here
   int tileSizes[] = {0, 32, 64};
@@ -191,18 +206,17 @@ int main(int argc, char **argv) {
       gemm<<<BPG, TPB>>>(deviceA, deviceB, deviceC, numARows, numAColumns, numBRows, numBColumns);
       cudaDeviceSynchronize();
       double time_kernel = cpuSecond() - t0;
-      printf("Timing: %f ms\n", time_kernel);
-    }
-    else {
+      printf("Timing: %f\n", time_kernel);
+    } else {
       //@@ Launch the tiled GPU Kernel here
       printf("\nCUDA tiled gemm with tile [%d, %d]\n", tileSize, tileSize);
       dim3 TPB(tileSize, tileSize);
       dim3 BPG((numCRows + TPB.x - 1) / TPB.x, (numCColumns + TPB.y - 1) / TPB.y);
       t0 = cpuSecond();
-      tiled_gemm<<<BPG, TPB, 2 * tileSize * tileSize * sizeof(DataType)>>>(deviceA, deviceB, deviceC, numARows, numAColumns, numBRows, numBColumns, TILE_SIZE);
+      tiled_gemm<<<BPG, TPB, 2 * tileSize * tileSize * sizeof(DataType)>>>(deviceA, deviceB, deviceC, numARows, numAColumns, numBRows, numBColumns, tileSize);
       cudaDeviceSynchronize();
       double time_kernel = cpuSecond() - t0;
-      printf("Timing: %f ms\n", time_kernel);
+      printf("Timing: %f\n", time_kernel);
     }
     //@@ Copy the GPU memory back to the CPU here (for every kernel)
     cudaMemcpy(hostC, deviceC, numCRows * numCColumns * sizeof(DataType), cudaMemcpyDeviceToHost);
@@ -216,16 +230,11 @@ int main(int argc, char **argv) {
   cudaFree(deviceB);
   cudaFree(deviceC);
 
-
   //@@ Free the CPU memory here
   free(hostA);
   free(hostB);
   free(hostC);
   free(resultRef);
-
-  // N;H2D copy;kernel gpu;D2H copy;kernel cpu
-  //int N = numCColumns;
-  //printf("%d;%.6f;%.6f;%.6f;%.6f\n", N, time_copy, time_kernel, time_copyback, time_cpu);
 
   return 0;
 }
