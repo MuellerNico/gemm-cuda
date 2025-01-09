@@ -36,9 +36,6 @@ __global__ void tiled_gemm(DataType *A, DataType *B, DataType *C, int numARows,
   extern __shared__ DataType shared[];
   DataType* As = shared;
   DataType* Bs = shared + TILE_SIZE * TILE_SIZE;
-  // tiles in shmem
- // __shared__ DataType As[TILE_SIZE][TILE_SIZE];
-  //__shared__ DataType Bs[TILE_SIZE][TILE_SIZE];
   
   DataType sum = 0;
   
@@ -50,24 +47,24 @@ __global__ void tiled_gemm(DataType *A, DataType *B, DataType *C, int numARows,
       
       // load A tile into shared memory
       if (globalRow < numARows && (tileIdx + col) < numAColumns) {
-          As[row][col] = A[globalRow * numAColumns + (tileIdx + col)];
+          As[row * TILE_SIZE + col] = A[globalRow * numAColumns + (tileIdx + col)];
       } 
       else {
-          As[row][col] = 0;
+          As[row * TILE_SIZE + col] = 0;
       }
       
       // load B tile into shared memory
       if ((tileIdx + row) < numBRows && globalCol < numBColumns) {
-          Bs[row][col] = B[(tileIdx + row) * numBColumns + globalCol];
+          Bs[row * TILE_SIZE + col] = B[(tileIdx + row) * numBColumns + globalCol];
       } 
       else {
-          Bs[row][col] = 0;
+          Bs[row * TILE_SIZE + col] = 0;
       }
       
       __syncthreads(); // continue after all threads have loaded their tiles
       
       for (int k = 0; k < TILE_SIZE; k++) {
-          sum += As[row][k] * Bs[k][col];
+          sum += As[row * TILE_SIZE + k] * Bs[k * TILE_SIZE + col];
       }
       
       __syncthreads(); // finish computation before loading next tile
