@@ -204,12 +204,8 @@ float checkResult(float *A, float *B, int rows, int cols) {
     return maxRelErr;
 }
 
-/**
- * @brief Checks the result of the matrix multiplication by comparing the output with the reference.
- *
- * This function computes the infinity norm of the difference between the output and the reference.
- */
-DataType checkResult(DataType *A, DataType *B, int rows, int cols) {
+// infinity norm error
+/*DataType checkResult(DataType *A, DataType *B, int rows, int cols) {
   // return inf norm of A - B
   DataType diff = 0;
   DataType maxDiff = 0;
@@ -220,7 +216,7 @@ DataType checkResult(DataType *A, DataType *B, int rows, int cols) {
     }
   }
   return maxDiff;
-}
+}*/
 
 /**
  * @brief Returns the current time in seconds.
