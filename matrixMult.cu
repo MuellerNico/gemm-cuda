@@ -1,11 +1,34 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <mma.h>
+#include <cuda_fp16.h>
+
+using namespace nvcuda;
 
 #define DataType float
 
 /**
- * @brief Performs matrix multiplication of two matrices A and B, and adds the result to matrix C.
+ * @brief Performs matrix multiplication of two matrices A and B on the CPU.
+ *
+ * This function computes the general matrix multiplication (GEMM) operation:
+ * C = A * B
+ */
+void gemm_CPU(DataType *A, DataType *B, DataType *C, int numARows,
+        int numAColumns, int numBRows, int numBColumns) {
+  for (int i = 0; i < numARows; i++) {
+    for (int j = 0; j < numBColumns; j++) {
+      DataType sum = 0;
+      for (int k = 0; k < numAColumns; k++) {
+        sum += A[i * numAColumns + k] * B[k * numBColumns + j];
+      }
+      C[i * numBColumns + j] = sum;
+    }
+  }
+}
+
+/**
+ * @brief Naive GPU matrix multiplication
  *
  * This function computes the general matrix multiplication (GEMM) operation:
  * C = alpha * A * B + beta * C
@@ -86,23 +109,99 @@ __global__ void tiled_gemm(DataType *A, DataType *B, DataType *C, int numARows,
   }
 }
 
-/**
- * @brief Performs matrix multiplication of two matrices A and B on the CPU.
- *
- * This function computes the general matrix multiplication (GEMM) operation:
- * C = A * B
- */
-void gemm_CPU(DataType *A, DataType *B, DataType *C, int numARows,
-        int numAColumns, int numBRows, int numBColumns) {
-  for (int i = 0; i < numARows; i++) {
-    for (int j = 0; j < numBColumns; j++) {
-      DataType sum = 0;
-      for (int k = 0; k < numAColumns; k++) {
-        sum += A[i * numAColumns + k] * B[k * numBColumns + j];
-      }
-      C[i * numBColumns + j] = sum;
+
+// Convert single precision to half precision
+__global__ void convertFP32ToFP16(float* in, half* out, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        out[idx] = __float2half(in[idx]);
     }
-  }
+}
+
+// WMMA GEMM kernel
+__global__ void wmma_gemm(half* A, half* B, float* C, 
+                         int M, int N, int K) {
+    // WMMA fragment declarations
+    wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
+    wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
+    wmma::fragment<wmma::accumulator, 16, 16, 16, float> c_frag;
+
+    // Calculate thread block position
+    int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
+    int warpN = (blockIdx.y * blockDim.y + threadIdx.y);
+    
+    // M and N must be multiples of 16
+    if (warpM >= M/16 || warpN >= N/16) return;
+
+    // Initialize accumulator fragment
+    wmma::fill_fragment(c_frag, 0.0f);
+
+    // Loop over K dimension
+    for (int i = 0; i < K; i += 16) {
+        int aRow = warpM * 16;
+        int aCol = i;
+        int bRow = i;
+        int bCol = warpN * 16;
+
+        // Load the inputs
+        wmma::load_matrix_sync(a_frag, A + aRow * K + aCol, K);
+        wmma::load_matrix_sync(b_frag, B + bRow * N + bCol, N);
+
+        // Perform matrix multiplication
+        wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+    }
+
+    // Store the output
+    int cRow = warpM * 16;
+    int cCol = warpN * 16;
+    wmma::store_matrix_sync(C + cRow * N + cCol, c_frag, N, wmma::mem_row_major);
+}
+
+// Helper function to launch WMMA kernel
+void launchWMMAKernel(float* A, float* B, float* C,
+                      int M, int N, int K) {
+    // Allocate device memory for FP16 matrices
+    half *d_A_half, *d_B_half;
+    float *d_C_float;
+    
+    cudaMalloc(&d_A_half, M * K * sizeof(half));
+    cudaMalloc(&d_B_half, K * N * sizeof(half));
+    cudaMalloc(&d_C_float, M * N * sizeof(float));
+
+    // Convert input matrices to FP16
+    int threadsPerBlock = 256;
+    int blocksA = (M * K + threadsPerBlock - 1) / threadsPerBlock;
+    int blocksB = (K * N + threadsPerBlock - 1) / threadsPerBlock;
+
+    convertFP32ToFP16<<<blocksA, threadsPerBlock>>>(A, d_A_half, M * K);
+    convertFP32ToFP16<<<blocksB, threadsPerBlock>>>(B, d_B_half, K * N);
+
+    // Launch WMMA kernel
+    dim3 blockDim(128, 4);
+    dim3 gridDim(
+        (M + (16 * blockDim.x / 32) - 1) / (16 * blockDim.x / 32),
+        (N + 16 * blockDim.y - 1) / (16 * blockDim.y)
+    );
+
+    wmma_gemm<<<gridDim, blockDim>>>(d_A_half, d_B_half, d_C_float, M, N, K);
+
+    // Copy result back to output matrix
+    cudaMemcpy(C, d_C_float, M * N * sizeof(float), cudaMemcpyDeviceToHost);
+
+    // Cleanup
+    cudaFree(d_A_half);
+    cudaFree(d_B_half);
+    cudaFree(d_C_float);
+}
+
+// Modified checkResult function to calculate relative error
+float checkResult(float *A, float *B, int rows, int cols) {
+    float maxRelErr = 0.0f;
+    for (int i = 0; i < rows * cols; ++i) {
+        float relErr = fabs(A[i] - B[i]) / (fabs(B[i]) + 1e-10f);
+        maxRelErr = fmax(maxRelErr, relErr);
+    }
+    return maxRelErr;
 }
 
 /**
@@ -224,6 +323,15 @@ int main(int argc, char **argv) {
     DataType error = checkResult(hostC, resultRef, numCRows, numCColumns);
     printf("Error: %f\n", error);
   }
+
+  printf("\nCUDA WMMA gemm\n");
+  t0 = cpuSecond();
+  launchWMMAKernel(deviceA, deviceB, hostC, numARows, numAColumns, numBColumns);
+  cudaDeviceSynchronize();
+  double time_wmma = cpuSecond() - t0;
+  printf("Timing: %f\n", time_wmma);
+  float wmma_error = checkResult(hostC, resultRef, numCRows, numCColumns);
+  printf("WMMA Error: %f\n", wmma_error);
 
   //@@ Free the GPU memory here
   cudaFree(deviceA);
