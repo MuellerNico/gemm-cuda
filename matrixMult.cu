@@ -118,42 +118,6 @@ __global__ void convertFP32ToFP16(float* in, half* out, int n) {
     }
 }
 
-// Helper function to launch WMMA kernel
-void launchWMMAKernel(float* A, float* B, float* C,
-                      int M, int N, int K) {
-    // Allocate device memory for FP16 matrices
-    half *d_A_half, *d_B_half;
-    float *d_C_float;
-    
-    cudaMalloc(&d_A_half, M * K * sizeof(half));
-    cudaMalloc(&d_B_half, K * N * sizeof(half));
-    cudaMalloc(&d_C_float, M * N * sizeof(float));
-
-    // Convert input matrices to FP16
-    int threadsPerBlock = 256;
-    int blocksA = (M * K + threadsPerBlock - 1) / threadsPerBlock;
-    int blocksB = (K * N + threadsPerBlock - 1) / threadsPerBlock;
-
-    convertFP32ToFP16<<<blocksA, threadsPerBlock>>>(A, d_A_half, M * K);
-    convertFP32ToFP16<<<blocksB, threadsPerBlock>>>(B, d_B_half, K * N);
-    
-    cudaMemset(d_C_float, 0, M * N * sizeof(float));
-
-    // Set dimensions for WMMA kernel
-    dim3 block(128); // 4 warps per block
-    dim3 grid((M + 31) / 32, (N + 31) / 32);
-
-    wmma_gemm<<<grid, block>>>(d_A_half, d_B_half, d_C_float, M, N, K);
-    
-    // Copy result back to output matrix
-    cudaMemcpy(C, d_C_float, M * N * sizeof(float), cudaMemcpyDeviceToHost);
-
-    // Cleanup
-    cudaFree(d_A_half);
-    cudaFree(d_B_half);
-    cudaFree(d_C_float);
-}
-
 // wmma kernel for matrix multiplication with tensor cores
 __global__ void wmma_gemm(half* A, half* B, float* C, 
                          int M, int N, int K) {
@@ -188,7 +152,46 @@ __global__ void wmma_gemm(half* A, half* B, float* C,
     // Store result
     int cRow = warpM * 16;
     int cCol = warpN * 16;
-    wmma::store_matrix_sync(C + cRow * N + cCol, c_frag, N, wmma::mem_row_major);
+    if (cRow < M && cCol < numBColumns)
+    {
+      wmma::store_matrix_sync(C + cRow * N + cCol, c_frag, N, wmma::mem_row_major);
+    }
+}
+
+// Helper function to launch WMMA kernel
+void launchWMMAKernel(float* A, float* B, float* C,
+                      int M, int N, int K) {
+    // Allocate device memory for FP16 matrices
+    half *d_A_half, *d_B_half;
+    float *d_C_float;
+    
+    cudaMalloc(&d_A_half, M * K * sizeof(half));
+    cudaMalloc(&d_B_half, K * N * sizeof(half));
+    cudaMalloc(&d_C_float, M * N * sizeof(float));
+
+    // Convert input matrices to FP16
+    int threadsPerBlock = 256;
+    int blocksA = (M * K + threadsPerBlock - 1) / threadsPerBlock;
+    int blocksB = (K * N + threadsPerBlock - 1) / threadsPerBlock;
+
+    convertFP32ToFP16<<<blocksA, threadsPerBlock>>>(A, d_A_half, M * K);
+    convertFP32ToFP16<<<blocksB, threadsPerBlock>>>(B, d_B_half, K * N);
+    
+    cudaMemset(d_C_float, 0, M * N * sizeof(float));
+
+    // Set dimensions for WMMA kernel
+    dim3 block(128); // 4 warps per block
+    dim3 grid((M + 31) / 32, (N + 31) / 32);
+
+    wmma_gemm<<<grid, block>>>(d_A_half, d_B_half, d_C_float, M, N, K);
+    
+    // Copy result back to output matrix
+    cudaMemcpy(C, d_C_float, M * N * sizeof(float), cudaMemcpyDeviceToHost);
+
+    // Cleanup
+    cudaFree(d_A_half);
+    cudaFree(d_B_half);
+    cudaFree(d_C_float);
 }
 
 // Modified checkResult function to calculate relative error
