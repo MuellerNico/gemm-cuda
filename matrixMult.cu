@@ -152,7 +152,7 @@ __global__ void wmma_gemm(half* A, half* B, float* C,
     // Store result
     int cRow = warpM * 16;
     int cCol = warpN * 16;
-    if (cRow < M && cCol < numBColumns)
+    if (cRow < M && cCol < N)
     {
       wmma::store_matrix_sync(C + cRow * N + cCol, c_frag, N, wmma::mem_row_major);
     }
