@@ -121,19 +121,20 @@ __global__ void convertFP32ToFP16(float* in, half* out, int n) {
 // WMMA GEMM kernel TODO: replace float with DataType
 __global__ void wmma_gemm(half* A, half* B, float* C, 
                          int M, int N, int K) {
-    // WMMA fragment declarations
+    // Each warp computes a 16x16 output tile
+    int warpID = threadIdx.x / 32;
+    int warpM = blockIdx.x * (blockDim.x / 32) + warpID;
+    int warpN = blockIdx.y;
+
+    // Check bounds
+    if (warpM >= M/16 || warpN >= N/16) return;
+
+    // Declare fragments
     wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
     wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> c_frag;
 
-    // Calculate thread block position
-    int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
-    int warpN = (blockIdx.y * blockDim.y + threadIdx.y);
-    
-    // M and N must be multiples of 16
-    if (warpM >= M/16 || warpN >= N/16) return;
-
-    // Initialize accumulator fragment
+    // Initialize accumulator
     wmma::fill_fragment(c_frag, 0.0f);
 
     // Loop over K dimension
@@ -143,15 +144,13 @@ __global__ void wmma_gemm(half* A, half* B, float* C,
         int bRow = i;
         int bCol = warpN * 16;
 
-        // Load the inputs
+        // Load inputs and compute
         wmma::load_matrix_sync(a_frag, A + aRow * K + aCol, K);
         wmma::load_matrix_sync(b_frag, B + bRow * N + bCol, N);
-
-        // Perform matrix multiplication
         wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
     }
 
-    // Store the output
+    // Store result
     int cRow = warpM * 16;
     int cCol = warpN * 16;
     wmma::store_matrix_sync(C + cRow * N + cCol, c_frag, N, wmma::mem_row_major);
@@ -160,6 +159,12 @@ __global__ void wmma_gemm(half* A, half* B, float* C,
 // Helper function to launch WMMA kernel
 void launchWMMAKernel(float* A, float* B, float* C,
                       int M, int N, int K) {
+    // Check if dimensions are multiples of 16
+    if (M % 16 != 0 || N % 16 != 0 || K % 16 != 0) {
+        printf("Error: Matrix dimensions must be multiples of 16 for WMMA\n");
+        return;
+    }
+    
     // Allocate device memory for FP16 matrices
     half *d_A_half, *d_B_half;
     float *d_C_float;
@@ -175,15 +180,24 @@ void launchWMMAKernel(float* A, float* B, float* C,
 
     convertFP32ToFP16<<<blocksA, threadsPerBlock>>>(A, d_A_half, M * K);
     convertFP32ToFP16<<<blocksB, threadsPerBlock>>>(B, d_B_half, K * N);
+    
+    // Initialize output matrix to zero
+    cudaMemset(d_C_float, 0, M * N * sizeof(float));
 
-    // Launch WMMA kernel
-    dim3 blockDim(128, 4);
-    dim3 gridDim(
-        (M + (16 * blockDim.x / 32) - 1) / (16 * blockDim.x / 32),
-        (N + 16 * blockDim.y - 1) / (16 * blockDim.y)
-    );
+    // Set dimensions for WMMA kernel
+    // Each warp handles a 16x16 tile
+    int const WARP_SIZE = 32;
+    dim3 block(128); // 4 warps per block
+    dim3 grid((M + (WARP_SIZE - 1)) / WARP_SIZE, (N + WARP_SIZE - 1) / WARP_SIZE);
 
-    wmma_gemm<<<gridDim, blockDim>>>(d_A_half, d_B_half, d_C_float, M, N, K);
+    wmma_gemm<<<grid, block>>>(d_A_half, d_B_half, d_C_float, M, N, K);
+    cudaDeviceSynchronize();
+
+    // Check for errors
+    cudaError_t error = cudaGetLastError();
+    if (error != cudaSuccess) {
+        printf("CUDA error: %s\n", cudaGetErrorString(error));
+    }
 
     // Copy result back to output matrix
     cudaMemcpy(C, d_C_float, M * N * sizeof(float), cudaMemcpyDeviceToHost);
