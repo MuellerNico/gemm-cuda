@@ -118,7 +118,43 @@ __global__ void convertFP32ToFP16(float* in, half* out, int n) {
     }
 }
 
-// WMMA GEMM kernel TODO: replace float with DataType
+// Helper function to launch WMMA kernel
+void launchWMMAKernel(float* A, float* B, float* C,
+                      int M, int N, int K) {
+    // Allocate device memory for FP16 matrices
+    half *d_A_half, *d_B_half;
+    float *d_C_float;
+    
+    cudaMalloc(&d_A_half, M * K * sizeof(half));
+    cudaMalloc(&d_B_half, K * N * sizeof(half));
+    cudaMalloc(&d_C_float, M * N * sizeof(float));
+
+    // Convert input matrices to FP16
+    int threadsPerBlock = 256;
+    int blocksA = (M * K + threadsPerBlock - 1) / threadsPerBlock;
+    int blocksB = (K * N + threadsPerBlock - 1) / threadsPerBlock;
+
+    convertFP32ToFP16<<<blocksA, threadsPerBlock>>>(A, d_A_half, M * K);
+    convertFP32ToFP16<<<blocksB, threadsPerBlock>>>(B, d_B_half, K * N);
+    
+    cudaMemset(d_C_float, 0, M * N * sizeof(float));
+
+    // Set dimensions for WMMA kernel
+    dim3 block(128); // 4 warps per block
+    dim3 grid((M + 31) / 32, (N + 31) / 32);
+
+    wmma_gemm<<<grid, block>>>(d_A_half, d_B_half, d_C_float, M, N, K);
+    
+    // Copy result back to output matrix
+    cudaMemcpy(C, d_C_float, M * N * sizeof(float), cudaMemcpyDeviceToHost);
+
+    // Cleanup
+    cudaFree(d_A_half);
+    cudaFree(d_B_half);
+    cudaFree(d_C_float);
+}
+
+// wmma kernel for matrix multiplication with tensor cores
 __global__ void wmma_gemm(half* A, half* B, float* C, 
                          int M, int N, int K) {
     // Each warp computes a 16x16 output tile
@@ -126,7 +162,6 @@ __global__ void wmma_gemm(half* A, half* B, float* C,
     int warpM = blockIdx.x * (blockDim.x / 32) + warpID;
     int warpN = blockIdx.y;
 
-    // Check bounds
     if (warpM >= M/16 || warpN >= N/16) return;
 
     // Declare fragments
@@ -154,58 +189,6 @@ __global__ void wmma_gemm(half* A, half* B, float* C,
     int cRow = warpM * 16;
     int cCol = warpN * 16;
     wmma::store_matrix_sync(C + cRow * N + cCol, c_frag, N, wmma::mem_row_major);
-}
-
-// Helper function to launch WMMA kernel
-void launchWMMAKernel(float* A, float* B, float* C,
-                      int M, int N, int K) {
-    // Check if dimensions are multiples of 16
-    if (M % 16 != 0 || N % 16 != 0 || K % 16 != 0) {
-        printf("Error: Matrix dimensions must be multiples of 16 for WMMA\n");
-        return;
-    }
-    
-    // Allocate device memory for FP16 matrices
-    half *d_A_half, *d_B_half;
-    float *d_C_float;
-    
-    cudaMalloc(&d_A_half, M * K * sizeof(half));
-    cudaMalloc(&d_B_half, K * N * sizeof(half));
-    cudaMalloc(&d_C_float, M * N * sizeof(float));
-
-    // Convert input matrices to FP16
-    int threadsPerBlock = 256;
-    int blocksA = (M * K + threadsPerBlock - 1) / threadsPerBlock;
-    int blocksB = (K * N + threadsPerBlock - 1) / threadsPerBlock;
-
-    convertFP32ToFP16<<<blocksA, threadsPerBlock>>>(A, d_A_half, M * K);
-    convertFP32ToFP16<<<blocksB, threadsPerBlock>>>(B, d_B_half, K * N);
-    
-    // Initialize output matrix to zero
-    cudaMemset(d_C_float, 0, M * N * sizeof(float));
-
-    // Set dimensions for WMMA kernel
-    // Each warp handles a 16x16 tile
-    int const WARP_SIZE = 32;
-    dim3 block(128); // 4 warps per block
-    dim3 grid((M + (WARP_SIZE - 1)) / WARP_SIZE, (N + WARP_SIZE - 1) / WARP_SIZE);
-
-    wmma_gemm<<<grid, block>>>(d_A_half, d_B_half, d_C_float, M, N, K);
-    cudaDeviceSynchronize();
-
-    // Check for errors
-    cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
-        printf("CUDA error: %s\n", cudaGetErrorString(error));
-    }
-
-    // Copy result back to output matrix
-    cudaMemcpy(C, d_C_float, M * N * sizeof(float), cudaMemcpyDeviceToHost);
-
-    // Cleanup
-    cudaFree(d_A_half);
-    cudaFree(d_B_half);
-    cudaFree(d_C_float);
 }
 
 // Modified checkResult function to calculate relative error
@@ -306,7 +289,7 @@ int main(int argc, char **argv) {
 
   //@@ Initialize the grid and block dimensions here
   int tileSizes[] = {0, 32, 64};
-  int numTileSizes = 3;
+  int numTileSizes = 0;
 
   for (int i = 0; i < numTileSizes; i++) {
     int tileSize = tileSizes[i];
