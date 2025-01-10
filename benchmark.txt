@@ -1,0 +1,128 @@
+TILED MATRIX
+
+Input matrix dim (1024 x 1024) (1024 x 1024) (1024 x 1024)
+
+CPU reference
+Timing: 0.000000 ms
+
+CUDA tiled gemm with tile [8, 8]
+Timing: 0.017204 ms
+Checking result
+Error: 287.311432
+
+CUDA tiled gemm with tile [16, 16]
+Timing: 0.034854 ms
+Checking result
+Error: 287.311432
+
+CUDA tiled gemm with tile [32, 32]
+Timing: 0.107921 ms
+Checking result
+Error: 287.311432
+
+CUDA gemm
+Timing: 0.071456 ms
+Checking result
+Error: 287.311432
+
+Input matrix dim (2048 x 2048) (2048 x 2048) (2048 x 2048)
+
+CPU reference
+Timing: 93.049888 ms
+
+CUDA tiled gemm with tile [8, 8]
+Timing: 0.135684 ms
+Checking result
+Error: 0.000183
+
+CUDA tiled gemm with tile [16, 16]
+Timing: 0.155287 ms
+Checking result
+Error: 0.000183
+
+CUDA tiled gemm with tile [32, 32]
+Timing: 0.328719 ms
+Checking result
+Error: 0.000183
+
+CUDA gemm
+Timing: 0.280413 ms
+Checking result
+Error: 0.000183
+
+IGNORE ERROR
+
+Input matrix dim (4096 x 4096) (4096 x 4096) (4096 x 4096)
+
+CPU reference
+Timing: 0.000000 ms
+
+CUDA tiled gemm with tile [8, 8]
+Timing: 0.633295 ms
+Checking result
+Error: 1094.582520
+
+CUDA tiled gemm with tile [16, 16]
+Timing: 0.815158 ms
+Checking result
+Error: 1094.582520
+
+CUDA tiled gemm with tile [32, 32]
+Timing: 2.502125 ms
+Checking result
+Error: 1094.582520
+
+CUDA gemm
+Timing: 2.231324 ms
+Checking result
+Error: 1094.582520
+
+Input matrix dim (8192 x 8192) (8192 x 8192) (8192 x 8192)
+
+CPU reference
+Timing: 0.000000 ms
+
+CUDA tiled gemm with tile [8, 8]
+Timing: 4.215392 ms
+Checking result
+Error: 2157.770752
+
+CUDA tiled gemm with tile [16, 16]
+Timing: 6.515443 ms
+Checking result
+Error: 2157.770752
+
+CUDA tiled gemm with tile [32, 32]
+Timing: 19.904485 ms
+Checking result
+Error: 2157.770752
+
+CUDA gemm
+Timing: 17.803508 ms
+Checking result
+Error: 2157.770752
+
+Input matrix dim (16384 x 16384) (16384 x 16384) (16384 x 16384)
+
+CPU reference
+Timing: 0.000000 ms
+
+CUDA tiled gemm with tile [8, 8]
+Timing: 34.358248 ms
+Checking result
+Error: 4262.201660
+
+CUDA tiled gemm with tile [16, 16]
+Timing: 55.756577 ms
+Checking result
+Error: 4262.201660
+
+CUDA tiled gemm with tile [32, 32]
+Timing: 160.352764 ms
+Checking result
+Error: 4262.201660
+
+CUDA gemm
+Timing: 164.176662 ms
+Checking result
+Error: 4262.201660
