@@ -118,7 +118,7 @@ __global__ void convertFP32ToFP16(float* in, half* out, int n) {
     }
 }
 
-// WMMA GEMM kernel
+// WMMA GEMM kernel TODO: replace float with DataType
 __global__ void wmma_gemm(half* A, half* B, float* C, 
                          int M, int N, int K) {
     // WMMA fragment declarations
@@ -195,7 +195,7 @@ void launchWMMAKernel(float* A, float* B, float* C,
 }
 
 // Modified checkResult function to calculate relative error
-float checkResult(float *A, float *B, int rows, int cols) {
+DataType relativeError(float *A, float *B, int rows, int cols) {
     float maxRelErr = 0.0f;
     for (int i = 0; i < rows * cols; ++i) {
         float relErr = fabs(A[i] - B[i]) / (fabs(B[i]) + 1e-10f);
@@ -205,7 +205,7 @@ float checkResult(float *A, float *B, int rows, int cols) {
 }
 
 // infinity norm error
-/*DataType checkResult(DataType *A, DataType *B, int rows, int cols) {
+DataType inftyNorm(DataType *A, DataType *B, int rows, int cols) {
   // return inf norm of A - B
   DataType diff = 0;
   DataType maxDiff = 0;
@@ -216,7 +216,11 @@ float checkResult(float *A, float *B, int rows, int cols) {
     }
   }
   return maxDiff;
-}*/
+}
+
+DataType checkResult(DataType *A, DataType *B, int rows, int cols) {
+  return inftyNorm(A, B, rows, cols);
+}
 
 /**
  * @brief Returns the current time in seconds.
