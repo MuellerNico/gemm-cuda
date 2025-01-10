@@ -127,9 +127,9 @@ __global__ void wmma_gemm(half* A, half* B, float* C,
     //int warpN = blockIdx.y;
 
     int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
-    int warmN = (blockIdx.y * blockDim.y + threadIdx.y);
-    int aRow = warp_row * 16;
-    int bCol = warp_col * 16;
+    int warpN = (blockIdx.y * blockDim.y + threadIdx.y);
+    int aRow = warpM * 16;
+    int bCol = warpN * 16;
 
     if (warpM >= M/16 || warpN >= N/16) return;
 
@@ -191,8 +191,8 @@ void launchWMMAKernel(float* A, float* B, float* C,
 
     dim3 block(128, 4);
     dim3 grid(
-      (numARows + (16 * block.x / 32) - 1) / (16 * block.x / 32),
-      (numBColumns + 16 * block.y - 1) / (16 * block.y));
+      (N + (16 * block.x / 32) - 1) / (16 * block.x / 32),
+      (M + 16 * block.y - 1) / (16 * block.y));
 
     wmma_gemm<<<grid, block>>>(d_A_half, d_B_half, d_C_float, M, N, K);
     
