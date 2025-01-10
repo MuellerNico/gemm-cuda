@@ -122,9 +122,14 @@ __global__ void convertFP32ToFP16(float* in, half* out, int n) {
 __global__ void wmma_gemm(half* A, half* B, float* C, 
                          int M, int N, int K) {
     // Each warp computes a 16x16 output tile
-    int warpID = threadIdx.x / 32;
-    int warpM = blockIdx.x * (blockDim.x / 32) + warpID;
-    int warpN = blockIdx.y;
+    //int warpID = threadIdx.x / 32;
+    //int warpM = blockIdx.x * (blockDim.x / 32) + warpID;
+    //int warpN = blockIdx.y;
+
+    int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
+    int warmN = (blockIdx.y * blockDim.y + threadIdx.y);
+    int aRow = warp_row * 16;
+    int bCol = warp_col * 16;
 
     if (warpM >= M/16 || warpN >= N/16) return;
 
@@ -138,15 +143,16 @@ __global__ void wmma_gemm(half* A, half* B, float* C,
 
     // Loop over K dimension
     for (int i = 0; i < K; i += 16) {
-        int aRow = warpM * 16;
         int aCol = i;
         int bRow = i;
-        int bCol = warpN * 16;
 
-        // Load inputs and compute
-        wmma::load_matrix_sync(a_frag, A + aRow * K + aCol, K);
-        wmma::load_matrix_sync(b_frag, B + bRow * N + bCol, N);
-        wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+        //if (aRow < M && i < N)
+        //{
+          // Load inputs and compute
+          wmma::load_matrix_sync(a_frag, A + aRow * K + aCol, K);
+          wmma::load_matrix_sync(b_frag, B + bRow * N + bCol, N);
+          wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+        //}
     }
 
     // Store result
@@ -180,8 +186,13 @@ void launchWMMAKernel(float* A, float* B, float* C,
     cudaMemset(d_C_float, 0, M * N * sizeof(float));
 
     // Set dimensions for WMMA kernel
-    dim3 block(128); // 4 warps per block
-    dim3 grid((M + 31) / 32, (N + 31) / 32);
+    //dim3 block(128); // 4 warps per block
+    //dim3 grid((M + 31) / 32, (N + 31) / 32);
+
+    dim3 block(128, 4);
+    dim3 grid(
+      (numARows + (16 * block.x / 32) - 1) / (16 * block.x / 32),
+      (numBColumns + 16 * block.y - 1) / (16 * block.y));
 
     wmma_gemm<<<grid, block>>>(d_A_half, d_B_half, d_C_float, M, N, K);
     
