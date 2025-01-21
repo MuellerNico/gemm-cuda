@@ -1,0 +1,113 @@
+Input matrix dim (1024 x 1024) (1024 x 1024) (1024 x 1024)
+==PROF== Connected to process 28099 (/content/gemm-cuda/gemm-cuda/a.out)
+
+CPU reference
+Timing: 4.091752
+
+CUDA gemm
+==PROF== Profiling "gemm" - 0: 0%....50%....100% - 1 pass
+Timing: 0.736140
+Error: 0.000092
+
+CUDA tiled gemm with tile [8, 8]
+==PROF== Profiling "tiled_gemm" - 1: 0%....50%....100% - 1 pass
+Timing: 0.036692
+Error: 0.000092
+
+CUDA WMMA gemm
+==PROF== Profiling "convertFP32ToFP16" - 2: 0%....50%....100% - 1 pass
+==PROF== Profiling "convertFP32ToFP16" - 3: 0%....50%....100% - 1 pass
+==PROF== Profiling "wmma_gemm" - 4: 0%....50%....100% - 1 pass
+Timing: 0.053669
+WMMA Error: 0.016907
+==PROF== Disconnected from process 28099
+[28099] a.out@127.0.0.1
+  gemm(float *, float *, float *, int, int, int, int) (32, 32, 1)x(32, 32, 1), Context 1, Stream 7, Device 0, CC 7.5
+    Section: Command line profiler metrics
+    --------------------------------- ----------- ------------
+    Metric Name                       Metric Unit Metric Value
+    --------------------------------- ----------- ------------
+    sm__inst_executed_pipe_tensor.avg        inst            0
+    sm__inst_executed_pipe_tensor.max        inst            0
+    sm__inst_executed_pipe_tensor.min        inst            0
+    sm__inst_executed_pipe_tensor.sum        inst            0
+    --------------------------------- ----------- ------------
+
+  tiled_gemm(float *, float *, float *, int, int, int, int, int) (128, 128, 1)x(8, 8, 1), Context 1, Stream 7, Device 0, CC 7.5
+    Section: Command line profiler metrics
+    --------------------------------- ----------- ------------
+    Metric Name                       Metric Unit Metric Value
+    --------------------------------- ----------- ------------
+    sm__inst_executed_pipe_tensor.avg        inst            0
+    sm__inst_executed_pipe_tensor.max        inst            0
+    sm__inst_executed_pipe_tensor.min        inst            0
+    sm__inst_executed_pipe_tensor.sum        inst            0
+    --------------------------------- ----------- ------------
+
+  convertFP32ToFP16(float *, __half *, int) (4096, 1, 1)x(256, 1, 1), Context 1, Stream 7, Device 0, CC 7.5
+    Section: Command line profiler metrics
+    --------------------------------- ----------- ------------
+    Metric Name                       Metric Unit Metric Value
+    --------------------------------- ----------- ------------
+    sm__inst_executed_pipe_tensor.avg        inst            0
+    sm__inst_executed_pipe_tensor.max        inst            0
+    sm__inst_executed_pipe_tensor.min        inst            0
+    sm__inst_executed_pipe_tensor.sum        inst            0
+    --------------------------------- ----------- ------------
+
+  convertFP32ToFP16(float *, __half *, int) (4096, 1, 1)x(256, 1, 1), Context 1, Stream 7, Device 0, CC 7.5
+    Section: Command line profiler metrics
+    --------------------------------- ----------- ------------
+    Metric Name                       Metric Unit Metric Value
+    --------------------------------- ----------- ------------
+    sm__inst_executed_pipe_tensor.avg        inst            0
+    sm__inst_executed_pipe_tensor.max        inst            0
+    sm__inst_executed_pipe_tensor.min        inst            0
+    sm__inst_executed_pipe_tensor.sum        inst            0
+    --------------------------------- ----------- ------------
+
+  wmma_gemm(__half *, __half *, float *, int, int, int) (16, 16, 1)x(128, 4, 1), Context 1, Stream 7, Device 0, CC 7.5
+    Section: Command line profiler metrics
+    --------------------------------- ----------- ------------
+    Metric Name                       Metric Unit Metric Value
+    --------------------------------- ----------- ------------
+    sm__inst_executed_pipe_tensor.avg        inst    26,214.40
+    sm__inst_executed_pipe_tensor.max        inst       28,672
+    sm__inst_executed_pipe_tensor.min        inst       24,576
+    sm__inst_executed_pipe_tensor.sum        inst    1,048,576
+    --------------------------------- ----------- ------------
+
+ wmma_gemm(__half *, __half *, float *, int, int, int) (32, 8, 1)x(64, 8, 1), Context 1, Stream 7, Device 0, CC 7.5
+    Section: Command line profiler metrics
+    --------------------------------- ----------- ------------
+    Metric Name                       Metric Unit Metric Value
+    --------------------------------- ----------- ------------
+    sm__inst_executed_pipe_tensor.avg        inst    26,214.40
+    sm__inst_executed_pipe_tensor.max        inst       28,672
+    sm__inst_executed_pipe_tensor.min        inst       24,576
+    sm__inst_executed_pipe_tensor.sum        inst    1,048,576
+    --------------------------------- ----------- ------------
+
+wmma_gemm(__half *, __half *, float *, int, int, int) (8, 32, 1)x(256, 2, 1), Context 1, Stream 7, Device 0, CC 7.5
+    Section: Command line profiler metrics
+    --------------------------------- ----------- ------------
+    Metric Name                       Metric Unit Metric Value
+    --------------------------------- ----------- ------------
+    sm__inst_executed_pipe_tensor.avg        inst    26,214.40
+    sm__inst_executed_pipe_tensor.max        inst       28,672
+    sm__inst_executed_pipe_tensor.min        inst       24,576
+    sm__inst_executed_pipe_tensor.sum        inst    1,048,576
+    --------------------------------- ----------- ------------
+
+wmma_gemm(__half *, __half *, float *, int, int, int) (8, 4, 1)x(32, 2, 1), Context 1, Stream 7, Device 0, CC 7.5
+    Section: Command line profiler metrics
+    --------------------------------- ----------- ------------
+    Metric Name                       Metric Unit Metric Value
+    --------------------------------- ----------- ------------
+    sm__inst_executed_pipe_tensor.avg        inst        51.20
+    sm__inst_executed_pipe_tensor.max        inst           64
+    sm__inst_executed_pipe_tensor.min        inst            0
+    sm__inst_executed_pipe_tensor.sum        inst        2,048
+    --------------------------------- ----------- ------------  
+
+

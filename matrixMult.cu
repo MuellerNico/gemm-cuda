@@ -8,12 +8,7 @@ using namespace nvcuda;
 
 #define DataType float
 
-/**
- * @brief Performs matrix multiplication of two matrices A and B on the CPU.
- *
- * This function computes the general matrix multiplication (GEMM) operation:
- * C = A * B
- */
+// naive CPU matrix multiplication
 void gemm_CPU(DataType *A, DataType *B, DataType *C, int numARows,
         int numAColumns, int numBRows, int numBColumns) {
   for (int i = 0; i < numARows; i++) {
@@ -27,13 +22,7 @@ void gemm_CPU(DataType *A, DataType *B, DataType *C, int numARows,
   }
 }
 
-/**
- * @brief Naive GPU matrix multiplication
- *
- * This function computes the general matrix multiplication (GEMM) operation:
- * C = alpha * A * B + beta * C
- * where A, B, and C are matrices, and alpha and beta are scalars.
- */
+//Naive GPU matrix multiplication
 __global__ void gemm(DataType *A, DataType *B, DataType *C, int numARows,
            int numAColumns, int numBRows, int numBColumns) {
   int row = blockIdx.x * blockDim.x + threadIdx.x;
@@ -50,14 +39,7 @@ __global__ void gemm(DataType *A, DataType *B, DataType *C, int numARows,
   C[row * numBColumns + col] = sum;
 }
 
-/**
- * @brief Performs a tiled matrix multiplication (GEMM) on the GPU.
- *
- * This function computes the product of two matrices A and B, and stores the result in matrix C.
- * The computation is performed using a tiled approach to optimize memory access patterns and improve performance.
- * 
- * @param TILE_SIZE Size of the tile used for the computation.
- */
+// Tiled GPU matrix multiplication
 __global__ void tiled_gemm(DataType *A, DataType *B, DataType *C, int numARows,
                int numAColumns, int numBRows, int numBColumns, int TILE_SIZE) {
   int blockRow = blockIdx.x;
@@ -109,8 +91,7 @@ __global__ void tiled_gemm(DataType *A, DataType *B, DataType *C, int numARows,
   }
 }
 
-
-// Convert single precision to half precision
+// Helper kernel to convert single precision to half precision
 __global__ void convertFP32ToFP16(float* in, half* out, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
@@ -118,7 +99,7 @@ __global__ void convertFP32ToFP16(float* in, half* out, int n) {
     }
 }
 
-// wmma kernel for matrix multiplication with tensor cores
+// wmma GPU matrix multiplication with tensor cores
 __global__ void wmma_gemm(half* A, half* B, float* C, 
                          int M, int N, int K) {
     // Each warp computes a 16x16 output tile
@@ -133,12 +114,10 @@ __global__ void wmma_gemm(half* A, half* B, float* C,
 
     if (warpM >= M/16 || warpN >= N/16) return;
 
-    // Declare fragments
+    // Create fragments and accumulator
     wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
     wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> c_frag;
-
-    // Initialize accumulator
     wmma::fill_fragment(c_frag, 0.0f);
 
     // Loop over K dimension
@@ -155,7 +134,6 @@ __global__ void wmma_gemm(half* A, half* B, float* C,
         //}
     }
 
-    // Store result
     int cRow = warpM * 16;
     int cCol = warpN * 16;
     if (cRow < M && cCol < N)
@@ -164,7 +142,7 @@ __global__ void wmma_gemm(half* A, half* B, float* C,
     }
 }
 
-// Helper function to launch WMMA kernel
+// Helper function to launch wmma kernel
 void launchWMMAKernel(float* A, float* B, float* C,
                       int M, int N, int K) {
     // Allocate device memory for FP16 matrices
@@ -175,7 +153,7 @@ void launchWMMAKernel(float* A, float* B, float* C,
     cudaMalloc(&d_B_half, K * N * sizeof(half));
     cudaMalloc(&d_C_float, M * N * sizeof(float));
 
-    // Convert input matrices to FP16
+    // Convert input to half precision
     int threadsPerBlock = 256;
     int blocksA = (M * K + threadsPerBlock - 1) / threadsPerBlock;
     int blocksB = (K * N + threadsPerBlock - 1) / threadsPerBlock;
@@ -183,13 +161,15 @@ void launchWMMAKernel(float* A, float* B, float* C,
     convertFP32ToFP16<<<blocksA, threadsPerBlock>>>(A, d_A_half, M * K);
     convertFP32ToFP16<<<blocksB, threadsPerBlock>>>(B, d_B_half, K * N);
     
-    cudaMemset(d_C_float, 0, M * N * sizeof(float));
+    cudaMemset(d_C_float, 0, M * N * sizeof(float)); // init output to 0
 
     // Set dimensions for WMMA kernel
     //dim3 block(128); // 4 warps per block
     //dim3 grid((M + 31) / 32, (N + 31) / 32);
 
     dim3 block(128, 4);
+    //dim block(32, 1);
+    //dim block(16, 16);
     dim3 grid(
       (N + (16 * block.x / 32) - 1) / (16 * block.x / 32),
       (M + 16 * block.y - 1) / (16 * block.y));
@@ -205,7 +185,7 @@ void launchWMMAKernel(float* A, float* B, float* C,
     cudaFree(d_C_float);
 }
 
-// Modified checkResult function to calculate relative error
+// max relative error between two matrices 
 DataType relativeError(float *A, float *B, int rows, int cols) {
     float maxRelErr = 0.0f;
     for (int i = 0; i < rows * cols; ++i) {
@@ -217,7 +197,6 @@ DataType relativeError(float *A, float *B, int rows, int cols) {
 
 // infinity norm error
 DataType inftyNorm(DataType *A, DataType *B, int rows, int cols) {
-  // return inf norm of A - B
   DataType diff = 0;
   DataType maxDiff = 0;
   for (int i = 0; i < rows * cols; ++i) {
@@ -229,13 +208,12 @@ DataType inftyNorm(DataType *A, DataType *B, int rows, int cols) {
   return maxDiff;
 }
 
+// helper to switch between error types easier
 DataType checkResult(DataType *A, DataType *B, int rows, int cols) {
   return inftyNorm(A, B, rows, cols);
 }
 
-/**
- * @brief Returns the current time in seconds.
- */
+// Returns the current time in seconds.
 __host__ double cpuSecond() {
   struct timeval tp;
   gettimeofday(&tp, NULL);
@@ -257,7 +235,7 @@ int main(int argc, char **argv) {
   int numCRows;
   int numCColumns;
 
-  //@@ Insert code below to read in numARows, numAColumns, numBColumns from args
+  // read matrix dimensions from input
   numARows = strtol(argv[1], NULL, 10);
   numAColumns = strtol(argv[2], NULL, 10);
   numBRows = strtol(argv[2], NULL, 10);
@@ -267,13 +245,13 @@ int main(int argc, char **argv) {
 
   printf("Input matrix dim (%d x %d) (%d x %d) (%d x %d)\n", numARows, numAColumns, numBRows, numBColumns, numCRows, numCColumns);
 
-  //@@ Insert code below to allocate Host memory for input and output
+  // allocate Host memory for input and output
   hostA = (DataType*)malloc(numARows * numAColumns * sizeof(DataType));
   hostB = (DataType*)malloc(numBRows * numBColumns * sizeof(DataType));
   hostC = (DataType*)malloc(numCRows * numCColumns * sizeof(DataType));
   resultRef = (DataType*)malloc(numCRows * numCColumns * sizeof(DataType));
 
-  //@@ Insert code below to initialize hostA and hostB to random numbers, and create reference result in CPU
+  // initialize hostA and hostB to random numbers
   for (int i = 0; i < numARows * numAColumns; i++) {
     hostA[i] = 1.0 * rand() / RAND_MAX;
   }
@@ -281,34 +259,34 @@ int main(int argc, char **argv) {
     hostB[i] = 1.0 * rand() / RAND_MAX;
   }
 
-  //@@ Insert code below to allocate GPU memory here
+  // allocate GPU memory
   double t0 = cpuSecond();
   cudaMalloc((void**)&deviceA, numARows * numAColumns * sizeof(DataType));
   cudaMalloc((void**)&deviceB, numBRows * numBColumns * sizeof(DataType));
   cudaMalloc((void**)&deviceC, numCRows * numCColumns * sizeof(DataType));
   double time_alloc = cpuSecond() - t0;
 
-  //@@ Insert code to below to Copy memory to the GPU here
+  // Copy A and B to GPU
   t0 = cpuSecond();
   cudaMemcpy(deviceA, hostA, numARows * numAColumns * sizeof(DataType), cudaMemcpyHostToDevice);
   cudaMemcpy(deviceB, hostB, numBRows * numBColumns * sizeof(DataType), cudaMemcpyHostToDevice);
   double time_copy = cpuSecond() - t0;
 
-  //@@ Insert code below to compare the output with the reference
+  // Compute reference result on CPU 
   printf("\nCPU reference\n");
   t0 = cpuSecond();
   gemm_CPU(hostA, hostB, resultRef, numARows, numAColumns, numBRows, numBColumns);
   double time_cpu = cpuSecond() - t0;
   printf("Timing: %f\n", time_cpu);
 
-  //@@ Initialize the grid and block dimensions here
+  // tile sizes for tiled kernel (0 for normal gpu gemm)
   int tileSizes[] = {0, 32, 64};
-  int numTileSizes = 0;
+  int numTileSizes = 3;
 
   for (int i = 0; i < numTileSizes; i++) {
     int tileSize = tileSizes[i];
     if (tileSize == 0) {
-      //@@ Launch the normal GPU Kernel here
+      // Launch the naive GPU kernel
       printf("\nCUDA gemm\n");
       dim3 TPB(32, 32);
       dim3 BPG((numCRows + TPB.x - 1) / TPB.x, (numCColumns + TPB.y - 1) / TPB.y);
@@ -318,7 +296,7 @@ int main(int argc, char **argv) {
       double time_kernel = cpuSecond() - t0;
       printf("Timing: %f\n", time_kernel);
     } else {
-      //@@ Launch the tiled GPU Kernel here
+      // Launch the tiled GPU kernel here
       printf("\nCUDA tiled gemm with tile [%d, %d]\n", tileSize, tileSize);
       dim3 TPB(tileSize, tileSize);
       dim3 BPG((numCRows + TPB.x - 1) / TPB.x, (numCColumns + TPB.y - 1) / TPB.y);
@@ -328,13 +306,14 @@ int main(int argc, char **argv) {
       double time_kernel = cpuSecond() - t0;
       printf("Timing: %f\n", time_kernel);
     }
-    //@@ Copy the GPU memory back to the CPU here (for every kernel)
+    // Copy GPU memory back to CPU (same for every kernel)
     cudaMemcpy(hostC, deviceC, numCRows * numCColumns * sizeof(DataType), cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
+    // compare to reference and print error
     DataType error = checkResult(hostC, resultRef, numCRows, numCColumns);
     printf("Error: %f\n", error);
   }
-
+  // launch wmma kernel
   printf("\nCUDA WMMA gemm\n");
   t0 = cpuSecond();
   launchWMMAKernel(deviceA, deviceB, hostC, numARows, numAColumns, numBColumns);
@@ -344,12 +323,12 @@ int main(int argc, char **argv) {
   float wmma_error = checkResult(hostC, resultRef, numCRows, numCColumns);
   printf("WMMA Error: %f\n", wmma_error);
 
-  //@@ Free the GPU memory here
+  // Free GPU memory
   cudaFree(deviceA);
   cudaFree(deviceB);
   cudaFree(deviceC);
 
-  //@@ Free the CPU memory here
+  // Free CPU memory
   free(hostA);
   free(hostB);
   free(hostC);
